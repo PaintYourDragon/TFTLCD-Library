@@ -320,7 +320,7 @@ void Adafruit_TFTLCD::reset(void) {
   CS_ACTIVE;
   CD_COMMAND;
   write8(0x00);
-  for(uint8_t i=0; i<3; i++) WR_STROBE; // Write 4 0x00s total
+  for(uint8_t i=0; i<3; i++) WR_STROBE; // Three extra 0x00s
   CS_IDLE;
 }
 
@@ -678,6 +678,10 @@ void Adafruit_TFTLCD::setRotation(uint8_t x) {
   }
 }
 
+#ifdef read8isFunctionalized
+  #define read8(x) x=read8fn()
+#endif
+
 // Because this function is used infrequently, it configures the ports for
 // the read operation, reads the data, then restores the ports to the write
 // configuration.  Write operations happen a LOT, so it's advantageous to
@@ -742,7 +746,7 @@ uint16_t Adafruit_TFTLCD::readPixel(int16_t x, int16_t y) {
     return (((uint16_t)r & B11111000) << 8) |
            (((uint16_t)g & B11111100) << 3) |
            (           b              >> 3);
-  }
+  } else return 0;
 }
 
 // Ditto with the read/write port directions, as above.
@@ -758,8 +762,8 @@ uint16_t Adafruit_TFTLCD::readID(void) {
   CD_DATA;
   read8(hi);
   read8(lo);
-  CS_IDLE;
   setWriteDir();  // Restore LCD data port(s) to WRITE configuration
+  CS_IDLE;
 
   return (hi << 8) | lo;
 }
@@ -778,11 +782,11 @@ void Adafruit_TFTLCD::write8(uint8_t value) {
 }
 #endif
 
-#ifndef read8
-uint8_t Adafruit_TFTLCD::read8(void) {
-  // Do not merge or simplify -- macro shenanigans going on!
-  uint8_t d = read8inline();
-  return d;
+#ifdef read8isFunctionalized
+uint8_t Adafruit_TFTLCD::read8fn(void) {
+  uint8_t result;
+  read8inline(result);
+  return result;
 }
 #endif
 
