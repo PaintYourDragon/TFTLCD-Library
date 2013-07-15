@@ -301,7 +301,6 @@ void Adafruit_TFTLCD::begin(uint16_t id) {
 void Adafruit_TFTLCD::reset(void) {
 
   CS_IDLE;
-  CD_DATA;
   WR_IDLE;
   RD_IDLE;
 
@@ -317,12 +316,12 @@ void Adafruit_TFTLCD::reset(void) {
   }
 #endif
 
+  // Data transfer sync
   CS_ACTIVE;
-  CD_DATA;
+  CD_COMMAND;
   write8(0x00);
-  for(uint8_t i=0; i<7; i++) WR_STROBE;
+  for(uint8_t i=0; i<3; i++) WR_STROBE; // Write 4 0x00s total
   CS_IDLE;
-delay(100);
 }
 
 // Sets the LCD address window (and address counter, on 932X).
@@ -685,13 +684,12 @@ void Adafruit_TFTLCD::setRotation(uint8_t x) {
 // leave the ports in that state as a default.
 uint16_t Adafruit_TFTLCD::readPixel(int16_t x, int16_t y) {
 
-  uint16_t c;
-
   if((x < 0) || (y < 0) || (x >= _width) || (y >= _height)) return 0;
 
   CS_ACTIVE;
   if(driver == ID_932X) {
 
+    uint8_t hi, lo;
     int16_t t;
     switch(rotation) {
      case 1:
@@ -711,45 +709,59 @@ uint16_t Adafruit_TFTLCD::readPixel(int16_t x, int16_t y) {
     }
     writeRegister16(0x0020, x);
     writeRegister16(0x0021, y);
-    CD_COMMAND; write8(0x00); write8(0x22); // Read data from GRAM
+    // Inexplicable thing: sometimes pixel read has high/low bytes
+    // reversed.  A second read fixes this.  Unsure of reason.  Have
+    // tried adjusting timing in read8() etc. to no avail.
+    for(uint8_t pass=0; pass<2; pass++) {
+      CD_COMMAND; write8(0x00); write8(0x22); // Read data from GRAM
+      CD_DATA;
+      setReadDir();  // Set up LCD data port(s) for READ operations
+      read8(hi);     // First 2 bytes back are a dummy read
+      read8(hi);
+      read8(hi);     // Bytes 3, 4 are actual pixel value
+      read8(lo);
+      setWriteDir(); // Restore LCD data port(s) to WRITE configuration
+    }
+    CS_IDLE;
+    return ((uint16_t)hi << 8) | lo;
+
   } else if(driver == ID_7575) {
+
+    uint8_t r, g, b;
     writeRegisterPair(HX8347G_COLADDRSTART_HI, HX8347G_COLADDRSTART_LO, x);
     writeRegisterPair(HX8347G_ROWADDRSTART_HI, HX8347G_ROWADDRSTART_LO, y);
     CD_COMMAND; write8(0x22); // Read data from GRAM
+    setReadDir();  // Set up LCD data port(s) for READ operations
+    CD_DATA;
+    read8(r);      // First byte back is a dummy read
+    read8(r);
+    read8(g);
+    read8(b);
+    setWriteDir(); // Restore LCD data port(s) to WRITE configuration
+    CS_IDLE;
+    return (((uint16_t)r & B11111000) << 8) |
+           (((uint16_t)g & B11111100) << 3) |
+           (           b              >> 3);
   }
-
-  setReadDir(); // Set up LCD data port(s) for READ operations
-  CD_DATA;
-  c   = read8();        // Do not merge or otherwise simplify
-  c <<= 8;              // these lines.  It's an unfortunate
-  delayMicroseconds(1); // artifact of the macro substitution
-  c  |= read8();        // shenanigans that are going on.
-  setWriteDir(); // Restore LCD data port(s) to WRITE configuration
-  CS_IDLE;
-
-  return c;
 }
 
 // Ditto with the read/write port directions, as above.
 uint16_t Adafruit_TFTLCD::readID(void) {
 
-  uint16_t id;
+  uint8_t hi, lo;
 
   CS_ACTIVE;
   CD_COMMAND;
   write8(0x00);
-  write8(0x00);
+  WR_STROBE;     // Repeat prior byte (0x00)
   setReadDir();  // Set up LCD data port(s) for READ operations
   CD_DATA;
-  delayMicroseconds(10);
-  id   = read8();        // Do not merge or otherwise simplify
-  id <<= 8;              // these lines.  It's an unfortunate
-  delayMicroseconds(10); // artifact of the macro substitution
-  id  |= read8();        // shenanigans that are going on.
+  read8(hi);
+  read8(lo);
   CS_IDLE;
   setWriteDir();  // Restore LCD data port(s) to WRITE configuration
 
-  return id;
+  return (hi << 8) | lo;
 }
 
 // Pass 8-bit (each) R,G,B, get back 16-bit packed color

@@ -66,13 +66,108 @@
   // These are macros for I/O operations...
 
   // Write 8-bit value to LCD data lines
+// Ah HA.  Sometimes d is a const.  This makes the inline code
+// simpler in those cases.
+// The inline can't even match it because it resolves to a number
   #define write8inline(d) { \
    PORTD = (PORTD & B00101111) | ((d) & B11010000); \
    PORTB = (PORTB & B11010000) | ((d) & B00101111); \
    WR_STROBE; } // STROBEs are defined later
 
+  #define write0x00() write8inline(0x00)
+
+  #define Xwrite0x00() {                                          \
+    uint8_t _temp;                                               \
+    asm volatile(                                                \
+      "in   %[tmp]  , %[portd]" "\n\t" /* _temp  = PORTD      */ \
+      "andi %[tmp]  , 0x2F"     "\n\t" /* _temp &= B00101111  */ \
+      "out  %[portd], %[tmp]"   "\n\t" /* PORTD  = _temp      */ \
+      "in   %[tmp]  , %[portb]" "\n\t" /* _temp  = PORTB      */ \
+      "andi %[tmp]  , 0xD0"     "\n\t" /* _temp &= B11010000  */ \
+      "out  %[portb], %[tmp]"   "\n\t" /* PORTB  = _temp      */ \
+      "cbi  %[portc], 1"        "\n\t" /* WR low  (active)    */ \
+      "sbi  %[portc], 1"        "\n\t" /* WR high (inactive)  */ \
+      : [tmp]   "=d" (_temp)                                     \
+      : [portd] "I"  (_SFR_IO_ADDR(PORTD)),                      \
+        [portb] "I"  (_SFR_IO_ADDR(PORTB)),                      \
+        [portc] "I"  (_SFR_IO_ADDR(PORTC))                       \
+    );                                                           \
+  }
+
+  #define write0x22() write8inline(0x22)
+
+  #define Xwrite0x22() {                                             \
+    uint8_t _temp;                                                  \
+    asm volatile(                                                   \
+      "in   %[tmp]  , %[portd]" "\n\t" /* _temp  = PORTD         */ \
+      "andi %[tmp]  , 0x2F"     "\n\t" /* _temp &= B00101111     */ \
+      "ori  %[tmp]  , %[maskd]" "\n\t" /* _temp |= (0x22 & 0xD0) */ \
+      "out  %[portd], %[tmp]"   "\n\t" /* PORTD  = _temp         */ \
+      "in   %[tmp]  , %[portb]" "\n\t" /* _temp  = PORTB         */ \
+      "andi %[tmp]  , 0xD0"     "\n\t" /* _temp &= B11010000     */ \
+      "ori  %[tmp]  , %[maskb]" "\n\t" /* _temp |= (0x22 & 0x2F) */ \
+      "out  %[portb], %[tmp]"   "\n\t" /* PORTB  = _temp         */ \
+      "cbi  %[portc], 1"        "\n\t" /* WR low  (active)       */ \
+      "sbi  %[portc], 1"        "\n\t" /* WR high (inactive)     */ \
+      : [tmp]   "=d" (_temp)                                        \
+      : [portd] "I"  (_SFR_IO_ADDR(PORTD)),                         \
+        [maskd] "M"  (0x22 & 0xD0),                                 \
+        [portb] "I"  (_SFR_IO_ADDR(PORTB)),                         \
+        [maskb] "M"  (0x22 & 0x2F),                                 \
+        [portc] "I"  (_SFR_IO_ADDR(PORTC))                          \
+    );                                                              \
+  }
+
+  #define Xwrite8inline(d) {                                      \
+    uint8_t _temp1, _temp2;                                      \
+    asm volatile(                                                \
+      "in   %[tmp1] , %[portd]" "\n\t" /* _temp1  = PORTD     */ \
+      "andi %[tmp1] , 0x2F"     "\n\t" /* _temp1 &= B00101111 */ \
+      "mov  %[tmp2] , %[val]"   "\n\t" /* _temp2  = d         */ \
+      "andi %[tmp2] , 0xD0"     "\n\t" /* _temp2 &= B11010000 */ \
+      "or   %[tmp1] , %[tmp2]"  "\n\t" /* _temp1 |= _temp2    */ \
+      "out  %[portd], %[tmp1]"  "\n\t" /* PORTD   = _temp1    */ \
+      "in   %[tmp1] , %[portb]" "\n\t" /* _temp1  = PORTB     */ \
+      "andi %[tmp1] , 0xD0"     "\n\t" /* _temp1 &= B11010000 */ \
+      "mov  %[tmp2] , %[val]"   "\n\t" /* _temp2  = d         */ \
+      "andi %[tmp2] , 0x2F"     "\n\t" /* _temp2 &= B00101111 */ \
+      "or   %[tmp1] , %[tmp2]"  "\n\t" /* _temp1 |= _temp2    */ \
+      "out  %[portb], %[tmp1]"  "\n\t" /* PORTB   = _temp1    */ \
+      "cbi  %[portc], 1"        "\n\t" /* WR low  (active)    */ \
+      "sbi  %[portc], 1"        "\n\t" /* WR high (inactive)  */ \
+      : [tmp1] "=d" (_temp1),                                    \
+        [tmp2] "=d" (_temp2)                                     \
+      : [portd] "I" (_SFR_IO_ADDR(PORTD)),                       \
+        [portb] "I" (_SFR_IO_ADDR(PORTB)),                       \
+        [val]   "r" (d),                                         \
+        [portc] "I" (_SFR_IO_ADDR(PORTC))                        \
+    );                                                           \
+  }
+
+//  #define read8inline() (RD_STROBE, (PIND & B11010000) | (PINB & B00101111))
+
   // Read 8-bit value from LCD data lines
-  #define read8inline() (RD_STROBE, (PIND & B11010000) | (PINB & B00101111))
+  #define read8(result) { /* result MUST be uint8_t in caller */ \
+    uint8_t _temp;                                               \
+    asm volatile(                                                \
+      "cbi  %[portc] , 0"       "\n\t" /* RD low (active)     */ \
+      "rjmp .+0"                "\n\t" /* 125 nS nop          */ \
+      "rjmp .+0"                "\n\t" /* (pixel read         */ \
+      "rjmp .+0"                "\n\t" /*      requires       */ \
+      "rjmp .+0"                "\n\t" /*     400 nS minimum) */ \
+      "in   %[res]   , %[pind]" "\n\t" /* result = PIND       */ \
+      "in   %[tmp]   , %[pinb]" "\n\t" /* _temp  = PINB       */ \
+      "sbi  %[portc] , 0"       "\n\t" /* RD high (inactive)  */ \
+      "andi %[res]   , 0xD0"    "\n\t" /* result &= B11010000 */ \
+      "andi %[tmp]   , 0x2F"    "\n\t" /* _temp  &= B00101111 */ \
+      "or   %[res]   , %[tmp]"  "\n\t" /* result |= _temp     */ \
+      : [res]   "=d" (result),                                   \
+        [tmp]   "=d" (_temp)                                     \
+      : [portc] "I"  (_SFR_IO_ADDR(PORTC)),                      \
+        [pind]  "I"  (_SFR_IO_ADDR(PIND)),                       \
+        [pinb]  "I"  (_SFR_IO_ADDR(PINB))                        \
+      );                                                         \
+    }
 
   // These set the PORT directions as required before the write and read
   // operations.  Because write operations are much more common than reads,
@@ -89,9 +184,31 @@
    PORTD = (PORTD & B00000011) | ((d) & B11111100); \
    PORTB = (PORTB & B11111100) | ((d) & B00000011); \
    WR_STROBE; }
-  #define read8inline() (RD_STROBE, (PIND&  B11111100)|(PINB&  B00000011))
+//  #define read8inline() (RD_STROBE, (PIND&  B11111100)|(PINB&  B00000011))
   #define setWriteDirInline()      { DDRD|= B11111100;  DDRB|= B00000011; }
   #define setReadDirInline()       { DDRD&=~B11111100;  DDRB&=~B00000011; }
+
+  #define read8(result) { /* result MUST be uint8_t in caller */ \
+    uint8_t _temp;                                               \
+    asm volatile(                                                \
+      "cbi  %[portc] , 0"       "\n\t" /* RD low (active)     */ \
+      "rjmp .+0"                "\n\t" /* 125 nS nop          */ \
+      "rjmp .+0"                "\n\t" /* (pixel read         */ \
+      "rjmp .+0"                "\n\t" /*      requires       */ \
+      "rjmp .+0"                "\n\t" /*     400 nS minimum) */ \
+      "in   %[res]   , %[pind]" "\n\t" /* result = PIND       */ \
+      "in   %[tmp]   , %[pinb]" "\n\t" /* _temp  = PINB       */ \
+      "sbi  %[portc] , 0"       "\n\t" /* RD high (inactive)  */ \
+      "andi %[res]   , 0xFC"    "\n\t" /* result &= B11111100 */ \
+      "andi %[tmp]   , 0x03"    "\n\t" /* _temp  &= B00000011 */ \
+      "or   %[res]   , %[tmp]"  "\n\t" /* result |= _temp     */ \
+      : [res]   "=d" (result),                                   \
+        [tmp]   "=d" (_temp)                                     \
+      : [portc] "I"  (_SFR_IO_ADDR(PORTC)),                      \
+        [pind]  "I"  (_SFR_IO_ADDR(PIND)),                       \
+        [pinb]  "I"  (_SFR_IO_ADDR(PINB))                        \
+      );                                                         \
+    }
 
  #endif
 
